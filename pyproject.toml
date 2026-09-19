@@ -1,0 +1,31 @@
+[project]
+name = "mmh-discovery-outreach"
+version = "0.1.0"
+description = "Masjid discovery and outreach data pipeline for Muslim Media Hub"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "tenacity>=9.0",
+    "phonenumbers>=8.13",
+    "dnspython>=2.6",
+]
+
+[project.optional-dependencies]
+db = ["psycopg[binary,pool]>=3.2"]
+scrape = ["curl-cffi>=0.7", "selectolax>=0.3"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

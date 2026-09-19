@@ -1,0 +1,20 @@
+# Secrets - repo is public
+.env
+.env.*
+*.pem
+*.key
+*-credentials.json
+secrets.toml
+secrets/
+
+# Local data (scraped pages may contain personal data, never commit)
+data/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
