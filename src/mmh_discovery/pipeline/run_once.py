@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 
 import httpx
 import psycopg
+import truststore
 
 from mmh_discovery import config
 from mmh_discovery.core.scrape_outcome import RETRYABLE, classify_scrape_failure
@@ -193,6 +194,11 @@ def process_job(
 
 
 def run(run_id: str, limit: int, dry_run: bool) -> int:
+    # Verify TLS against the OS trust store, not certifi: many small org sites
+    # ship incomplete chains that browsers tolerate (Schannel auto-fetches
+    # missing intermediates). Must run before any HTTPS connection.
+    truststore.inject_into_ssl()
+
     if not config.DATABASE_URL:
         raise SystemExit("DATABASE_URL missing (set in .env)")
     logging.basicConfig(
