@@ -111,6 +111,64 @@ def _filter_items(items: list[ContactItem], corpus: str, normalised: bool,
     return kept
 
 
+def _infer_platform(url: str) -> str | None:
+    low = url.lower()
+    aliases = {
+        "facebook": ("facebook.com", "fb.com"),
+        "instagram": ("instagram.com", "instagr.am"),
+        "youtube": ("youtube.com", "youtu.be"),
+        "whatsapp": ("whatsapp.com", "wa.me"),
+        "tiktok": ("tiktok.com",),
+        "linkedin": ("linkedin.com", "lnkd.in"),
+        "twitter": ("twitter.com",),
+        "x": ("x.com",),
+    }
+    for platform, needles in aliases.items():
+        if any(n in low for n in needles):
+            return platform
+    return None
+
+
+def _coerce_payload(payload: dict, pages: list[tuple[str, str]]) -> dict:
+    """LLMs sometimes emit bare strings instead of {value, source_url} items.
+    Coerce them: source_url is the page whose HTML actually contains the value
+    (provenance stays honest), else the first page. Bare social strings get the
+    platform inferred from the URL; unknown platforms are dropped."""
+    if not isinstance(payload, dict):
+        raise ExtractionError("LLM output is not a JSON object")
+
+    def page_for(value: str) -> str:
+        for url, html in pages:
+            if value in html or value.replace("&", "&amp;") in html:
+                return url
+        return pages[0][0] if pages else ""
+
+    for key in ("emails", "phones", "contact_forms", "raw_context"):
+        items = payload.get(key)
+        if not isinstance(items, list):
+            continue
+        payload[key] = [
+            {"value": i, "source_url": page_for(i)} if isinstance(i, str) else i
+            for i in items
+        ]
+
+    socials = payload.get("socials")
+    if isinstance(socials, list):
+        coerced = []
+        for item in socials:
+            if not isinstance(item, str):
+                coerced.append(item)
+                continue
+            platform = _infer_platform(item)
+            if platform:
+                coerced.append({"platform": platform, "value": item,
+                                "source_url": page_for(item)})
+            else:
+                log.warning("dropping bare social with no inferable platform: %r", item)
+        payload["socials"] = coerced
+    return payload
+
+
 def extract_domain(
     llm: LLMClient, pages: list[tuple[str, str]]
 ) -> tuple[ExtractionResult, ExtractionStats]:
@@ -129,6 +187,7 @@ def extract_domain(
     except json.JSONDecodeError as exc:
         raise ExtractionError(f"LLM returned invalid JSON: {exc}") from exc
 
+    payload = _coerce_payload(payload, pages)
     try:
         result = ExtractionResult.model_validate(payload)
     except ValidationError as exc:
