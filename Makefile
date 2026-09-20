@@ -21,4 +21,4 @@ osm-import:
 	.venv\Scripts\python -m mmh_discovery.discovery.osm
 
 migrate:
-	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f supabase/migrations/0001_init.sql
+	.venv\Scripts\python scripts\migrate.py
