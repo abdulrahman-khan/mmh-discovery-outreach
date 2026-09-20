@@ -19,7 +19,7 @@ import httpx
 import psycopg
 
 from mmh_discovery import config
-from mmh_discovery.core.scrape_outcome import classify_scrape_failure
+from mmh_discovery.core.scrape_outcome import RETRYABLE, classify_scrape_failure
 from mmh_discovery.crawler.crawler import Crawler, CrawlOutcome
 from mmh_discovery.crawler.fetcher import Fetcher
 from mmh_discovery.crawler.rate_limiter import DomainRateLimiter
@@ -77,6 +77,19 @@ def claim_jobs(conn: psycopg.Connection, limit: int, run_id: str, dry_run: bool)
 
 def finish_job(conn: psycopg.Connection, job: Job, status: str, fail_reason: str | None) -> None:
     category = classify_scrape_failure(fail_reason) if fail_reason else None
+    if status == "failed" and category == RETRYABLE:
+        # Transient failures (timeouts, 429/5xx, DNS) re-enter the queue after
+        # the cooldown; anything else stays terminal for this job.
+        conn.execute(
+            """
+            update crawl_jobs
+            set status = 'queued', finished_at = now(), fail_category = %s, fail_reason = %s,
+                next_attempt_at = now() + (%s || ' days')::interval
+            where id = %s
+            """,
+            (category, fail_reason, config.RETRY_COOLDOWN_DAYS, job.id),
+        )
+        return
     conn.execute(
         """
         update crawl_jobs
