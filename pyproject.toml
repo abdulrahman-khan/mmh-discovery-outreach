@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 db = ["psycopg[binary,pool]>=3.2"]
 scrape = ["curl-cffi>=0.7", "selectolax>=0.3"]
+overture = ["duckdb>=1.1"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [build-system]
