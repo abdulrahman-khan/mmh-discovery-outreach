@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 
 from pydantic import ValidationError
 
 from mmh_discovery import config
-from mmh_discovery.extractor.llm_client import LLMClient, LLMResponse
+from mmh_discovery.extractor.llm_client import LLMClient, LLMError, LLMResponse
 from mmh_discovery.extractor.prompt import SYSTEM, user_prompt
 from mmh_discovery.extractor.schema import ContactItem, ExtractionResult, SocialItem
 from mmh_discovery.extractor.verbatim import contains_normalized, contains_url
@@ -60,6 +61,43 @@ def _strip_code_fences(text: str) -> str:
     return text.strip()
 
 
+_OVERFLOW_INPUT_RE = re.compile(r"prompt contains at least (\d+) input tokens")
+_BUDGET_SAFETY_TOKENS = 6_000  # headroom for the chat template wrapper + thinking
+_BUDGET_HEADROOM = 0.8  # "at least N tokens" is a lower bound; leave slack
+_BUDGET_MIN_CHARS = 20_000  # below this a corpus is too mutilated to extract
+
+
+def _chat_with_budget(llm: LLMClient, corpus: str, stats: ExtractionStats) -> LLMResponse:
+    """Call the LLM; on a context-overflow HTTP 400, shrink the corpus and
+    retry until it fits (bounded). vLLM reports `at least N` tokens, where
+    N = window - max_tokens: a lower bound, so one shrink from N under-
+    corrects on dense pages (observed 1.8 chars/token on Wix inline JSON).
+    Each iteration re-reads N, so the loop converges in a few cheap 400s."""
+    budget = len(corpus)
+    last_exc: LLMError | None = None
+    for attempt in range(4):
+        try:
+            response = llm.chat(SYSTEM, corpus[:budget])
+            if budget < len(corpus):
+                stats.truncated = True
+            return response
+        except LLMError as exc:
+            match = _OVERFLOW_INPUT_RE.search(str(exc))
+            if not match:
+                raise
+            last_exc = exc
+            reported = int(match.group(1))
+            available = (config.LLM_MAX_MODEL_LEN - config.LLM_MAX_TOKENS
+                         - _BUDGET_SAFETY_TOKENS)
+            budget = int(budget * min(_BUDGET_HEADROOM * available / reported, 0.9))
+            log.warning("context overflow (attempt %d, server: >=%d tokens); retrying at %d chars",
+                        attempt + 1, reported, budget)
+            if budget < _BUDGET_MIN_CHARS:
+                break
+    assert last_exc is not None
+    raise last_exc
+
+
 def _filter_items(items: list[ContactItem], corpus: str, normalised: bool,
                   category: str, stats: ExtractionStats) -> list[ContactItem]:
     check = contains_normalized if normalised else contains_url
@@ -80,7 +118,7 @@ def extract_domain(
     corpus, truncated = build_corpus(pages)
     stats = ExtractionStats(corpus_chars=len(corpus), truncated=truncated)
 
-    response: LLMResponse = llm.chat(SYSTEM, corpus)
+    response = _chat_with_budget(llm, corpus, stats)
     stats.prompt_tokens = response.prompt_tokens
     stats.completion_tokens = response.completion_tokens
     stats.latency_ms = response.latency_ms
