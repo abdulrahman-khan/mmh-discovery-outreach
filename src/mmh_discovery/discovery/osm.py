@@ -92,7 +92,6 @@ def fetch() -> list[dict]:
 
 def upsert(candidates: list[dict]) -> int:
     import psycopg
-    from psycopg.rows import dict_row
 
     rows = [
         (
@@ -103,8 +102,8 @@ def upsert(candidates: list[dict]) -> int:
         )
         for c in candidates
     ]
-    with psycopg.connect(config.DATABASE_URL, row_factory=dict_row) as conn, conn.transaction():
-        conn.executemany(
+    with psycopg.connect(config.DATABASE_URL) as conn, conn.transaction():
+        conn.cursor().executemany(
             """
             insert into org_candidates (
                 source_id, external_id, name, phone, email, website,
