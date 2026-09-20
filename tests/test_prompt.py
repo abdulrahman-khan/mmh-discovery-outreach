@@ -23,4 +23,5 @@ def test_system_prompt_states_verbatim_rule_and_schema():
 
 
 def test_prompt_version_is_stamped():
-    assert PROMPT_VERSION == "v1"
+    # exact value will bump over time; the stamp format (llm:{version}) is the contract
+    assert PROMPT_VERSION.startswith("v") and PROMPT_VERSION[1:].isdigit()

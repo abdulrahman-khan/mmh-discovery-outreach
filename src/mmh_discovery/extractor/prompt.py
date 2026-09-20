@@ -5,7 +5,7 @@ so re-extraction passes can be distinguished in field_provenance.
 """
 from __future__ import annotations
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 PAGE_SEPARATOR = "--- page: {url} ---"
 
@@ -40,6 +40,10 @@ Rules:
   prayer schedule notes, programmes, history, leadership) that a later
   summariser can use. Paraphrase is allowed here; still attach source_url.
 - Never include data from aggregator or third-party sites; only the given pages.
+- "emails" must be real contact addresses (local-part@domain). Never include
+  software/version/build strings that merely look like emails (e.g.
+  bootstrap@5.3.3, jquery@3.7.1) - these come from script metadata, not contact
+  info.
 - If a category has nothing, use an empty list.
 """
 
