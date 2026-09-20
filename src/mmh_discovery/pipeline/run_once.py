@@ -41,37 +41,49 @@ class Job:
     org_id: str | None
 
 
-def claim_jobs(conn: psycopg.Connection, limit: int, run_id: str, dry_run: bool) -> list[Job]:
+def claim_jobs(
+    conn: psycopg.Connection, limit: int, run_id: str, dry_run: bool, random_order: bool = False,
+    domains: tuple[str, ...] | None = None,
+) -> list[Job]:
     """Atomically move up to `limit` queued jobs to running and return them.
-    dry_run only reads: no state mutation in claim or finish."""
+    dry_run only reads: no state mutation in claim or finish.
+    random_order samples instead of FIFO (testing across heterogeneous sites).
+    domains restricts to those domains and re-claims done/failed jobs too
+    (targeted reprocessing; contacts upsert so re-runs are safe)."""
+    order = "order by random()" if random_order else "order by queued_at"
+    dom_sql = "and domain = any(%s)" if domains else ""
+    status_sql = "status <> 'running'" if domains else "status = 'queued'"
+    dom_params: tuple = (list(domains),) if domains else ()
     if dry_run:
         rows = conn.execute(
-            """
+            f"""
             select id, url, coalesce(domain, ''), org_id
             from crawl_jobs
-            where status = 'queued'
+            where {status_sql}
               and (next_attempt_at is null or next_attempt_at <= now())
-            order by queued_at
+              {dom_sql}
+            {order}
             limit %s
             """,
-            (limit,),
+            (*dom_params, limit),
         ).fetchall()
     else:
         rows = conn.execute(
-            """
+            f"""
             update crawl_jobs
             set status = 'running', started_at = now(), attempts = attempts + 1, run_id = %s
             where id in (
                 select id from crawl_jobs
-                where status = 'queued'
-                  and (next_attempt_at is null or next_attempt_at <= now())
-                order by queued_at
+                where {status_sql}
+                   and (next_attempt_at is null or next_attempt_at <= now())
+                  {dom_sql}
+                {order}
                 limit %s
                 for update skip locked
             )
             returning id, url, coalesce(domain, ''), org_id
             """,
-            (run_id, limit),
+            (run_id, *dom_params, limit),
         ).fetchall()
     return [Job(str(r[0]), r[1], r[2], str(r[3]) if r[3] else None) for r in rows]
 
@@ -193,7 +205,10 @@ def process_job(
             log.exception("job failed for %s", job.domain)
 
 
-def run(run_id: str, limit: int, dry_run: bool) -> int:
+def run(
+    run_id: str, limit: int, dry_run: bool, random_order: bool = False,
+    domains: tuple[str, ...] | None = None,
+) -> int:
     # Verify TLS against the OS trust store, not certifi: many small org sites
     # ship incomplete chains that browsers tolerate (Schannel auto-fetches
     # missing intermediates). Must run before any HTTPS connection.
@@ -211,7 +226,7 @@ def run(run_id: str, limit: int, dry_run: bool) -> int:
     crawl_failures: list[tuple[Job, str]] = []
 
     with psycopg.connect(config.DATABASE_URL) as conn:
-        jobs = claim_jobs(conn, limit, run_id, dry_run)
+        jobs = claim_jobs(conn, limit, run_id, dry_run, random_order, domains)
         conn.commit()
     if not jobs:
         log.info("no queued jobs")
@@ -266,9 +281,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=10, help="max jobs to claim")
     parser.add_argument("--dry-run", action="store_true", help="extract but skip all DB writes")
+    parser.add_argument("--random", action="store_true", help="sample queued jobs randomly")
+    parser.add_argument("--domain", action="append", help="reprocess only these domains")
     args = parser.parse_args()
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return run(run_id, args.limit, args.dry_run)
+    return run(run_id, args.limit, args.dry_run, args.random,
+               tuple(args.domain) if args.domain else None)
 
 
 if __name__ == "__main__":
