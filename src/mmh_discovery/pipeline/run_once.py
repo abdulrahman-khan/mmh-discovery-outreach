@@ -101,36 +101,51 @@ def finish_job(conn: psycopg.Connection, job: Job, status: str, fail_reason: str
 
 
 def resolve_org(conn: psycopg.Connection, job: Job) -> str | None:
-    """org_id from the job, else the best candidate for this domain: reuse its
-    resolved org, or create a minimal organization from the candidate.
-    One-candidate-one-org stub until real entity resolution lands."""
+    """org_id from the job, else the candidate whose website is EXACTLY this
+    job URL (shared-platform hosts carry many masjids under one domain, so a
+    domain-prefix match would collapse them all into one org). Reuse the
+    candidate's resolved org, an existing org with the same website, or create
+    one from the candidate. One-candidate-one-org stub until real entity
+    resolution lands."""
     if job.org_id:
         return job.org_id
+    # Compare scheme/www/trailing-slash-insensitive URL equality.
+    norm = "lower(rtrim(regexp_replace(coalesce({col}, ''), '^https?://(www\\.)?', ''), '/'))"
     row = conn.execute(
-        """
-        select resolved_org_id, name, website, city, province, lat, lng
+        f"""
+        select id, resolved_org_id, name, website, city, province, lat, lng
         from org_candidates
-        where lower(regexp_replace(coalesce(website, ''), '^https?://(www\\.)?', ''))
-              like %s
+        where {norm.format(col="website")} = {norm.format(col="%s")}
         order by resolved_org_id nulls last, created_at
         limit 1
         """,
-        (f"{job.domain}%",),
+        (job.url,),
     ).fetchone()
     if row is None:
         return None
-    if row[0]:
-        return str(row[0])
-    org_id = conn.execute(
-        """
-        insert into organizations (name, website, city, province, lat, lng)
-        values (%s, %s, %s, %s, %s, %s) returning id
-        """,
-        (row[1] or job.domain, row[2], row[3], row[4], row[5], row[6]),
-    ).fetchone()[0]
+    candidate_id, resolved, name, website, city, province, lat, lng = row
+    if resolved:
+        return str(resolved)
+    # Never create a second org for a website we already have.
+    existing = conn.execute(
+        f"select id from organizations where {norm.format(col='website')} = %s limit 1",
+        (job.url,),
+    ).fetchone()
+    if existing:
+        org_id = existing[0]
+    else:
+        org_id = conn.execute(
+            """
+            insert into organizations (name, website, city, province, lat, lng)
+            values (%s, %s, %s, %s, %s, %s) returning id
+            """,
+            (name or job.domain, website, city, province, lat, lng),
+        ).fetchone()[0]
+    # Stamp only the matched candidate row (a domain-wide update mis-resolves
+    # every sibling candidate on shared platforms).
     conn.execute(
-        "update org_candidates set resolved_org_id = %s where website ilike %s",
-        (org_id, f"%{job.domain}%"),
+        "update org_candidates set resolved_org_id = %s where id = %s",
+        (org_id, candidate_id),
     )
     return str(org_id)
 
