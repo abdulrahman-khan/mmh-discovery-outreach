@@ -1,24 +1,34 @@
-.PHONY: help setup lint test osm-import migrate
+.PHONY: help setup lint test osm-import migrate seed-jobs crawl-once migrate-apply
 
 help:
-	@echo setup        - create .venv and install dev dependencies
-	@echo lint         - ruff check
-	@echo test         - pytest
-	@echo osm-import   - dry-run OSM discovery importer (writes data/runs/)
-	@echo migrate      - apply supabase/migrations via psql (needs DATABASE_URL)
+	@echo setup          - uv sync \(venv + all extras\)
+	@echo lint           - ruff check
+	@echo test           - pytest
+	@echo osm-import     - dry-run OSM discovery importer (writes data/runs/)
+	@echo migrate        - apply supabase/migrations via scripts/migrate.py
+	@echo migrate-apply  - alias of migrate
+	@echo seed-jobs      - queue crawl_jobs from org_candidates websites
+	@echo crawl-once     - claim queued jobs, crawl, LLM-extract, persist
 
 setup:
-	python -m venv .venv
-	.venv\Scripts\python -m pip install -e ".[db,scrape,dev]"
+	uv sync --all-extras
 
 lint:
-	.venv\Scripts\python -m ruff check src tests
+	uv run ruff check src tests
 
 test:
-	.venv\Scripts\python -m pytest
+	uv run pytest
 
 osm-import:
-	.venv\Scripts\python -m mmh_discovery.discovery.osm
+	uv run python -m mmh_discovery.discovery.osm
 
 migrate:
-	.venv\Scripts\python scripts\migrate.py
+	uv run python scripts/migrate.py
+
+migrate-apply: migrate
+
+seed-jobs:
+	uv run python scripts/seed_crawl_jobs.py
+
+crawl-once:
+	uv run python -m mmh_discovery.pipeline.run_once
