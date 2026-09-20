@@ -32,7 +32,8 @@ Fresh machine to first pipeline run.
    website (blocklisted hosts skipped).
 5. `make crawl-once` - claims queued jobs, BFS-crawls each domain, runs one
    LLM extraction per domain, persists contacts + provenance.
-   Flags: `uv run python -m mmh_discovery.pipeline.run_once --limit N --dry-run`.
+   Flags: `uv run python -m mmh_discovery.pipeline.run_once --limit N --dry-run [--random] [--domain d.com ...]`
+   (`--random` samples queued jobs; `--domain` reprocesses specific domains, done/failed included).
 
 ## Layout
 
