@@ -18,7 +18,7 @@ from mmh_discovery import config
 from mmh_discovery.extractor.llm_client import LLMClient, LLMResponse
 from mmh_discovery.extractor.prompt import SYSTEM, user_prompt
 from mmh_discovery.extractor.schema import ContactItem, ExtractionResult, SocialItem
-from mmh_discovery.extractor.verbatim import contains_exact, contains_normalized
+from mmh_discovery.extractor.verbatim import contains_normalized, contains_url
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ def _strip_code_fences(text: str) -> str:
 
 def _filter_items(items: list[ContactItem], corpus: str, normalised: bool,
                   category: str, stats: ExtractionStats) -> list[ContactItem]:
-    check = contains_normalized if normalised else contains_exact
+    check = contains_normalized if normalised else contains_url
     kept = []
     for item in items:
         if check(item.value, corpus):

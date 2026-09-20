@@ -1,11 +1,26 @@
-"""Verbatim-match checks: exact for URLs, normalised for emails/phones."""
-from mmh_discovery.extractor.verbatim import contains_exact, contains_normalized
+"""Verbatim-match checks: corpus-URL aware for URLs, normalised for emails/phones."""
+from mmh_discovery.extractor.verbatim import contains_exact, contains_normalized, contains_url
 
 
 def test_exact_match_for_urls():
     hay = 'click <a href="https://example.com/contact">here</a>'
     assert contains_exact("https://example.com/contact", hay)
     assert not contains_exact("https://example.com/contact-us", hay)
+
+
+def test_url_match_ignores_query_and_trailing_slash():
+    hay = '<a href="https://twitter.com/ist_team?lang=en">x</a>'
+    assert contains_url("https://twitter.com/ist_team", hay)
+    assert contains_url("https://twitter.com/ist_team?lang=en", hay)
+    assert contains_url("https://twitter.com/ist_team/", hay)
+    # but never invents a handle that is not in the corpus
+    assert not contains_url("https://twitter.com/other_team", hay)
+
+
+def test_url_match_decodes_entities():
+    hay = '<a href="https://www.youtube.com/embed/videoseries?si=x&amp;list=PL123">v</a>'
+    assert contains_url("https://www.youtube.com/embed/videoseries?si=x&list=PL123", hay)
+    assert contains_url("https://www.youtube.com/embed/videoseries", hay)
 
 
 def test_email_plain_and_mailto():
