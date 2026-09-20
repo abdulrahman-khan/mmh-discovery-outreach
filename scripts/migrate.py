@@ -1,30 +1,17 @@
 """Apply supabase/migrations/*.sql in filename order using psycopg3.
 
 Usage: python scripts/migrate.py [--dry-run]
-Reads DATABASE_URL from .env (or environment).
 """
 from __future__ import annotations
 
 import argparse
-import os
-import sys
 from pathlib import Path
 
 import psycopg
 
-ROOT = Path(__file__).resolve().parent.parent
-MIGRATIONS_DIR = ROOT / "supabase" / "migrations"
+from mmh_discovery import config
 
-
-def load_env(path: Path) -> None:
-    if not path.exists():
-        return
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip())
+MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "supabase" / "migrations"
 
 
 def main() -> int:
@@ -32,23 +19,19 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    load_env(ROOT / ".env")
-    dsn = os.environ.get("DATABASE_URL", "")
-    if not dsn:
-        print("DATABASE_URL missing", file=sys.stderr)
-        return 1
+    if not config.DATABASE_URL:
+        raise SystemExit("DATABASE_URL missing (set in .env)")
 
     files = sorted(MIGRATIONS_DIR.glob("*.sql"))
     if not files:
-        print("no migrations found", file=sys.stderr)
-        return 1
+        raise SystemExit("no migrations found")
 
     if args.dry_run:
         for f in files:
             print(f"would apply: {f.name}")
         return 0
 
-    with psycopg.connect(dsn, autocommit=True) as conn:
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
         for f in files:
             print(f"applying: {f.name}")
             conn.execute(f.read_text(encoding="utf-8"))

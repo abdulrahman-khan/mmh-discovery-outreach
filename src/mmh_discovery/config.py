@@ -1,6 +1,10 @@
 """Pipeline tuning knobs. Secrets come from env; everything else is edited here."""
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
 OVERPASS_URL: str = os.getenv("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
