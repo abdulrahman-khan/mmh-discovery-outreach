@@ -1,8 +1,13 @@
 """Entity resolution: link unresolved org_candidates to organizations.
 
 Match tiers, strongest first (a candidate takes its best tier):
-  exact  - candidate website == org website (normalised: scheme/www/slash)
-  domain - same website domain and exactly one org carries that domain
+  exact  - candidate website == org website incl. path (normalised: scheme/
+           www/slash). A URL with a specific path identifies one institution,
+           so no proximity requirement (e.g. ahmadiyya.ca/mosques/<name>).
+  domain - same host and exactly one org carries it: shared-platform hosts
+           carry many masjids, so require BOTH <=2 km apart AND name
+           similarity >= 0.45. Two same-named masjids in different cities
+           are two institutions and must never merge.
   geoname- within ~250 m and pg_trgm name similarity >= 0.55
 Dry-run by default: prints tier counts and fuzzy-match samples. --apply
 stamps resolved_org_id and backfills NULL org fields (phone/email/website/
@@ -19,6 +24,12 @@ import psycopg
 from mmh_discovery import config
 
 NORM_URL = "lower(regexp_replace(%s, '^https?://(www\\.)?', '', 'i'))"
+HOST = f"split_part({NORM_URL % '%s'}, '/', 1)"
+# Great-circle-ish distance in km, good enough at city scale.
+KM = (
+    "111.32 * sqrt(power({a}.lat - {b}.lat, 2)"
+    " + power(({a}.lng - {b}.lng) * cos(radians({b}.lat)), 2))"
+)
 
 # One logical query per tier; each row is (candidate_id, org_id, extra).
 TIER_SQL = {
@@ -29,30 +40,33 @@ TIER_SQL = {
           on o.website is not null and o.status <> 'merged'
          and {NORM_URL % 'c.website'} = {NORM_URL % 'o.website'}
         where c.resolved_org_id is null and coalesce(c.website, '') <> ''
-          -- even an exact website match can be a platform homepage
-          -- (ahmadiyya.ca root): require the same town when both have coords.
-          and (c.lat is null or o.lat is null
-               or (c.lat between o.lat - 0.09 and o.lat + 0.09
-                   and c.lng between o.lng - 0.12 and o.lng + 0.12))
+          -- a full URL match (incl. path) identifies one institution; a bare
+          -- host match could be a platform homepage, so require a path or a
+          -- platform-subdomain-free site within the same town.
+          and (position('/' in {NORM_URL % 'c.website'}) > 0
+               or (c.lat is not null and o.lat is not null
+                   and {KM.format(a='c', b='o')} <= 2
+                   and similarity(lower(c.name), lower(o.name)) >= 0.45))
     """,
     "domain": f"""
         with cand as (
-            select id, {NORM_URL % 'website'} as dom, lat, lng
+            select id, {HOST % 'website'} as dom, name, lat as lat, lng as lng
             from org_candidates
             where resolved_org_id is null and coalesce(website, '') <> ''
         ),
         org as (
-            select id, split_part({NORM_URL % 'website'}, '/', 1) as dom, lat, lng
+            select id, {HOST % 'website'} as dom, name, lat as lat, lng as lng
             from organizations
             where website is not null and status <> 'merged'
         )
         select c.id, min(o.id::text)::uuid, 0.9
         from cand c join org o using (dom)
-        -- shared-platform hosts (ahmadiyya.ca, ismaili.org) carry hundreds of
-        -- masjids: a unique domain only means something in the same town.
-        where (c.lat is null or o.lat is null
-               or (c.lat between o.lat - 0.09 and o.lat + 0.09
-                   and c.lng between o.lng - 0.12 and o.lng + 0.12))
+        -- same host alone proves nothing: shared platforms carry hundreds of
+        -- masjids and two same-named masjids in different cities are two
+        -- institutions. Require same-place coordinates AND similar names.
+        where c.lat is not null and o.lat is not null
+          and {KM.format(a='c', b='o')} <= 2
+          and similarity(lower(c.name), lower(o.name)) >= 0.45
         group by c.id
         having count(distinct o.id) = 1
     """,
