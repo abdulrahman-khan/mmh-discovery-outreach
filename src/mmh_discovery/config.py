@@ -13,6 +13,11 @@ def _csv_env(name: str) -> list[str]:
 
 DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
+# Tavily search keys (free tier, 1000 credits each). Comma-separated for rotation.
+# Not _csv_env: keys are case-sensitive.
+TAVILY_API_KEYS: list[str] = [v.strip() for v in os.getenv("TAVILY_API_KEYS", "").split(",")
+                              if v.strip()]
+
 OVERPASS_URL: str = os.getenv("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
 OVERPASS_TIMEOUT_SECONDS: int = 180
 
