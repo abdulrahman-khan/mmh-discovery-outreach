@@ -216,6 +216,22 @@ def run(
 
     if not config.DATABASE_URL:
         raise SystemExit("DATABASE_URL missing (set in .env)")
+
+    # Reclaim jobs orphaned by a previous worker that died mid-run: any
+    # 'running' row not owned by this run can never finish on its own.
+    with psycopg.connect(config.DATABASE_URL) as conn, conn.transaction():
+        n = conn.execute(
+            """
+            update crawl_jobs
+            set status = 'queued', started_at = null, run_id = null
+            where status = 'running' and started_at < now() - interval '2 hours'
+              and (run_id is null or run_id <> %s)
+            """,
+            (run_id,),
+        ).rowcount
+    if n:
+        print(f"reclaimed {n} orphaned running jobs")
+
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
