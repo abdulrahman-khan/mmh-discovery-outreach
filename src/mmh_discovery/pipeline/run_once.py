@@ -163,6 +163,23 @@ def resolve_org(conn: psycopg.Connection, job: Job) -> str | None:
     return str(org_id)
 
 
+def _mark_job_failed(
+    dsn: str, job: Job, metrics: RunMetrics, stats: ExtractionStats,
+    error: str, dry_run: bool,
+) -> None:
+    """Record + persist a job failure on a fresh connection (the caller's may
+    already be dead - connection drops are a primary failure mode)."""
+    metrics.record_domain(job.domain, job.org_id, stats, error=error[:500])
+    if dry_run:
+        return
+    try:
+        with psycopg.connect(dsn) as conn:
+            finish_job(conn, job, "failed", error[:500])
+            conn.commit()
+    except Exception:
+        log.exception("could not mark job failed for %s", job.domain)
+
+
 def process_job(
     dsn: str,
     llm: LLMClient,
@@ -176,12 +193,19 @@ def process_job(
     stats = ExtractionStats()
     pages = [(p.final_url, p.status, p.html) for p in outcome.pages]
     extract_pages = [(p.final_url, p.html) for p in outcome.pages]
-    with psycopg.connect(dsn) as conn:
-        try:
+    # Extract BEFORE touching the DB: extraction takes minutes and hosted
+    # Postgres kills idle connections - never hold one across it.
+    try:
+        result, stats = extract_domain(llm, extract_pages)
+    except Exception as exc:  # per-job boundary: one bad domain must not kill the run
+        _mark_job_failed(dsn, job, metrics, stats, str(exc), dry_run)
+        log.exception("job failed for %s", job.domain)
+        return
+    try:
+        with psycopg.connect(dsn) as conn:
             org_id = resolve_org(conn, job)
             if org_id is None:
                 raise ExtractionError("no organization resolved for domain")
-            result, stats = extract_domain(llm, extract_pages)
             if dry_run:
                 counts = {
                     "email": len(result.emails),
@@ -192,17 +216,14 @@ def process_job(
                 }
             else:
                 counts = persist_extraction(conn, org_id, result, run_id, pages)
-                conn.commit()
-            metrics.record_domain(job.domain, org_id, stats, counts)
-            if not dry_run:
                 finish_job(conn, job, "done", None)
-            log.info("done %s: %s", job.domain, counts)
-        except Exception as exc:  # per-job boundary: one bad domain must not kill the run
-            conn.rollback()
-            metrics.record_domain(job.domain, job.org_id, stats, error=str(exc)[:500])
-            if not dry_run:
-                finish_job(conn, job, "failed", str(exc)[:500])
-            log.exception("job failed for %s", job.domain)
+            conn.commit()
+    except Exception as exc:
+        _mark_job_failed(dsn, job, metrics, stats, str(exc), dry_run)
+        log.exception("job failed for %s", job.domain)
+        return
+    metrics.record_domain(job.domain, org_id, stats, counts)
+    log.info("done %s: %s", job.domain, counts)
 
 
 def run(
@@ -248,7 +269,7 @@ def run(
         log.info("no queued jobs")
         return 0
 
-    with httpx.Client() as http, psycopg.connect(config.DATABASE_URL) as conn:
+    with httpx.Client() as http:
         robots = RobotsPolicy(http, allowlist=config.ROBOTS_ALLOWLIST)
         crawler = Crawler(Fetcher(http, robots, limiter))
         with ThreadPoolExecutor(max_workers=config.LLM_MAX_CONCURRENCY) as pool:
@@ -272,7 +293,9 @@ def run(
             for f in futures:
                 f.result()  # surface unexpected thread bugs
 
-        # Crawl-level failures: jobs never reached the extractor.
+    # Crawl-level failures and finalization on a fresh connection: nothing
+    # held a DB handle open across the crawl/extract phase.
+    with psycopg.connect(config.DATABASE_URL) as conn:
         for job, reason in crawl_failures:
             metrics.errors.append(f"{job.domain}: crawl failed: {reason}")
             metrics.rejected += 1
