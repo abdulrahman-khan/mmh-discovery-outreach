@@ -92,3 +92,19 @@ LLM_ENABLE_THINKING: bool = os.getenv("LLM_ENABLE_THINKING", "0") == "1"
 
 # Local run artifacts (JSONL metrics, OSM candidate dumps). Never committed.
 DATA_DIR: str = os.getenv("DATA_DIR", "data")
+
+# --- Search pipeline (Tavily enrichment pass) -------------------------------
+# Tavily basic search is 1 credit per call; the budget stops starting new
+# searches once spent so a runaway loop cannot burn the monthly free tier.
+SEARCH_RUN_CREDIT_BUDGET: int = int(os.getenv("SEARCH_RUN_CREDIT_BUDGET", "200"))
+SEARCH_QUERY_FRESHNESS_DAYS: int = int(os.getenv("SEARCH_QUERY_FRESHNESS_DAYS", "90"))
+SEARCH_MAX_RESULTS: int = 8
+SEARCH_SLEEP_SECONDS: float = 1.1
+SEARCH_TIMEOUT_SECONDS: float = 25.0
+# Domains never accepted as enrichment sources (aggregators, template junk).
+# Meta properties and friends live in BLOCKED_DOMAINS; this extends it.
+SEARCH_BLACKLIST_DOMAINS: set[str] = {
+    "placeweb.site", "pagesjaunes.fr", "yellowpages.ca", "yellowpages.com",
+    "yelp.ca", "pinterest.com", "pinterest.ca", "wikipedia.org",
+    "reddit.com", "quora.com", "guide2awq.com", "mosquefinder.org",
+}
