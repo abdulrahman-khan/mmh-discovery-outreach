@@ -1,4 +1,4 @@
-.PHONY: help setup lint test osm-import migrate seed-jobs crawl-once migrate-apply search-once
+.PHONY: help setup lint test osm-import migrate seed-jobs crawl-once migrate-apply search-once report prospects-report
 
 help:
 	@echo setup          - uv sync \(venv + all extras\)
@@ -36,3 +36,9 @@ crawl-once:
 
 search-once:
 	uv run python -m mmh_discovery.search.run --limit 10
+
+report:
+	uv run python scripts/export_readiness.py && uv run python scripts/build_report.py
+
+prospects-report:
+	uv run python scripts/build_prospects_report.py
