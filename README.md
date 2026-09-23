@@ -1,45 +1,36 @@
 # mmh-discovery-outreach
 
-Discovers and enriches masjid (mosque) contact data across Canada into Supabase
-for Muslim Media Hub outreach.
+Discovers Canadian masjids and builds an outreach-ready contact directory for Muslim Media Hub: who they are, where they are, and how to reach them - every contact traceable to the page it came from.
 
-## Pipeline
+## Data
 
-OSM / CRA / directories -> `org_candidates` (staging) -> entity resolution ->
-`organizations` + `contacts` with `field_provenance`.
-Websites are crawled politely (honest UA, robots.txt, 1 req/s per domain), up
-to 10 pages per domain via BFS. One LLM call per domain (DGX vLLM,
-OpenAI-compatible) extracts every distinct email/phone/social/contact form plus
-raw context excerpts; values are verbatim-checked against the fetched HTML
-before anything is written. No raw HTML is stored anywhere: `source_records` is
-an audit log of URL/status/content-hash per (URL, run), and per-domain token
-metrics land in `data/runs/{run_id}/extract.jsonl`.
+![How the data was built](docs/images/mmh-client-data-overview.png)
 
-## Hard bans
+## Data Collection Pipeline
 
-- Google Places / Maps data: ToS forbids storing business names or addresses
-  outside Google services. Never a source.
-- Scraping Facebook/Instagram/Meta: ToS violation. Social URLs are only read
-  off masjid websites, never crawled.
+![Search pipeline architecture](docs/images/search-pipeline-architecture.png)
 
-## Compliance
+## Report confidence levels
 
-- CASL: campaigns are classified by `campaigns.is_commercial`. Commercial CEMs
-  require express/implied consent, identification, and unsubscribe; addresses
-  harvested at scale are presumed non-consentable, so commercial sends require
-  a manual verification gate first.
-- PIPEDA: no raw HTML snapshots are retained (decision D-013). Contact data
-  lives only in `contacts` with provenance; crawl artifacts are metrics-only.
+The Search Leads report splits recovered contacts into two tabs. The split is about **evidence**, not guesswork:
 
-## Setup
+**Confirmed** - the organisation itself published the value:
 
-See `STARTUP.md` for the full walkthrough. TL;DR:
+- Email on the organisation's own domain (or on a page the organisation owns)
+- Phone or postal code published on the organisation's own pages
+- City that matches our Canadian city and postal records
 
-```
-make setup             # uv sync (venv + all extras)
-copy .env.example .env # fill DATABASE_URL
-make migrate           # apply supabase/migrations
-make seed-jobs         # queue crawl jobs from candidate websites
-make crawl-once        # crawl + LLM-extract + persist one batch
-make test
-```
+**Needs review** - someone else published the value, so a person should judge it:
+
+- Email or phone found on a third-party page (social media, business directories, charity registries) - it may be current, stale, or belong to a similarly named organisation
+- City or province mentioned in a search snippet with nothing to corroborate it
+- City not found in our postal records, or without a matching province
+
+How to use Needs review rows: click the source link shown on each row and check the page says what the report says it says. Confirmed rows were already applied to the main directory; Needs review rows never are, by design.
+
+## Data compliance
+
+- CASL / PIPEDA: business contact information is collected from public pages only; confirm the contact before the first send.
+- robots.txt respected on every crawl; rate limits honored.
+- No Google Places data and no Meta scraping - both are ToS violations and never used as sources.
+- No raw page snapshots retained; every stored value keeps provenance (source URL + fetch record).
