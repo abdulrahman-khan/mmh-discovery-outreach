@@ -1,6 +1,7 @@
 # Secrets - repo is public
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 *-credentials.json

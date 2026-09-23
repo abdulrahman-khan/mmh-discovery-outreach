@@ -9,11 +9,14 @@ dependencies = [
     "tenacity>=9.0",
     "phonenumbers>=8.13",
     "dnspython>=2.6",
+    "python-dotenv>=1.0",
+    "truststore>=0.10.4",
 ]
 
 [project.optional-dependencies]
 db = ["psycopg[binary,pool]>=3.2"]
 scrape = ["curl-cffi>=0.7", "selectolax>=0.3"]
+overture = ["duckdb>=1.1"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [build-system]

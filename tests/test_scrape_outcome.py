@@ -1,3 +1,4 @@
+"""Failure classification: bare reason strings and the composed strings the pipeline records."""
 from mmh_discovery.core.scrape_outcome import (
     BLOCKED,
     PERMANENT,
@@ -33,3 +34,27 @@ def test_thin():
 
 def test_none_is_permanent():
     assert classify_scrape_failure(None) == PERMANENT
+
+
+# --- composed reasons (what run_once actually records) ---
+
+def test_composed_status_reasons():
+    assert classify_scrape_failure("crawl failed: status 503") == RETRYABLE
+    assert classify_scrape_failure("crawl failed: status 404") == PERMANENT
+    assert classify_scrape_failure("crawl failed: status 403") == BLOCKED
+
+
+def test_policy_blocks_are_blocked_not_retryable():
+    assert classify_scrape_failure("crawl failed: blocked by robots.txt") == BLOCKED
+    assert classify_scrape_failure(
+        "crawl failed: blocked by url_guard: dns resolution failed") == BLOCKED
+
+
+def test_transient_errors_and_dns():
+    assert classify_scrape_failure(
+        "crawl failed: error: ConnectError: [SSL: CERTIFICATE_VERIFY_FAILED] ...") == RETRYABLE
+    assert classify_scrape_failure("crawl failed: error: ConnectTimeout: ...") == RETRYABLE
+
+
+def test_composed_thin():
+    assert classify_scrape_failure("crawl failed: content too short: 98 bytes") == THIN

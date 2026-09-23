@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canadian Masjids - Web Search Leads Report</title>
+<style>
+  :root { --ink:#1a2332; --mut:#66788f; --line:#e3e9f1; --bg:#f6f8fb; --card:#fff;
+          --accent:#1d4ed8; --ok:#15803d; --okbg:#ecfdf3; --warn:#b45309; --warnbg:#fffbeb; }
+  * { box-sizing:border-box; margin:0; }
+  body { font:15px/1.55 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); padding:28px 20px 60px; }
+  .wrap { max-width:1180px; margin:0 auto; }
+  h1 { font-size:24px; letter-spacing:-.01em; }
+  .sub { color:var(--mut); margin:6px 0 10px; max-width:760px; }
+  .stats { color:var(--mut); font-size:14px; margin-bottom:16px; }
+  .stats b { color:var(--ink); font-weight:600; }
+  .tabs { display:flex; gap:8px; margin-bottom:14px; }
+  .tabs button { padding:9px 16px; border:1px solid var(--line); background:var(--card);
+                 border-radius:9px; cursor:pointer; font:inherit; color:var(--mut); }
+  .tabs button.on { border-color:var(--accent); color:var(--accent);
+                    background:#eef4ff; font-weight:600; }
+  .tabs button .n { display:inline-block; min-width:22px; text-align:center;
+                    background:var(--bg); border-radius:99px; font-size:12.5px;
+                    padding:1px 7px; margin-left:6px; }
+  .bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+  input[type=search] { flex:1; min-width:220px; padding:8px 12px;
+      border:1px solid var(--line); border-radius:8px; font:inherit; background:var(--card); }
+  table { width:100%; border-collapse:collapse; background:var(--card);
+          border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  thead th { text-align:left; font-size:12px; text-transform:uppercase; letter-spacing:.04em;
+             color:var(--mut); padding:10px 12px; border-bottom:1px solid var(--line);
+             white-space:nowrap; background:#fbfcfe; }
+  tbody td { padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tbody tr:last-child td { border-bottom:0; }
+  tbody tr:hover { background:#f2f7ff; }
+  .name { font-weight:600; }
+  .org { color:var(--mut); font-size:13px; }
+  a { color:var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .rawurl { font-size:12.5px; color:var(--mut); word-break:break-all; max-width:300px; }
+  .chip { display:inline-block; font-size:12px; font-weight:600; padding:2px 9px;
+          border-radius:99px; white-space:nowrap; }
+  .chip.ok { color:var(--ok); background:var(--okbg); }
+  .chip.warn { color:var(--warn); background:var(--warnbg); }
+  .why { color:var(--mut); font-size:12.5px; margin-top:3px; }
+  .pager { display:flex; gap:8px; align-items:center; justify-content:flex-end;
+           margin:14px 0 0; color:var(--mut); font-size:14px; }
+  .pager button { padding:6px 12px; border:1px solid var(--line); background:var(--card);
+                  border-radius:8px; cursor:pointer; font:inherit; }
+  .pager button:disabled { opacity:.4; cursor:default; }
+  footer { margin-top:26px; color:var(--mut); font-size:13px; max-width:820px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Canadian Masjids &amp; Islamic Centres - Web Search Leads</h1>
+  <p class="sub">Contact details recovered by a public web-search pass for
+  organisations whose own websites could not be crawled. Every lead is shown
+  with the page it came from, so you can open the source and judge it yourself.</p>
+
+  <p class="stats">__STATS__</p>
+
+  <div class="tabs">
+    <button id="tab-ok" class="on">Confirmed<span class="n" id="n-ok"></span></button>
+    <button id="tab-rev">Needs review<span class="n" id="n-rev"></span></button>
+  </div>
+
+  <div class="bar">
+    <input type="search" id="q" placeholder="Search organisation, value, or source site...">
+  </div>
+
+  <table>
+    <thead><tr>
+      <th>Organisation</th><th>Field</th><th>Value</th>
+      <th>Found on</th><th>Confidence</th>
+    </tr></thead>
+    <tbody id="body"></tbody>
+  </table>
+
+  <div class="pager">
+    <span id="stat"></span>
+    <button id="prev">&#8592; Prev</button>
+    <button id="next">Next &#8594;</button>
+    <select id="per"><option>25</option><option>50</option><option>100</option></select>
+  </div>
+
+  <footer>Confirmed leads passed at least one strong rule: the value appears on the
+  organisation's own website or domain, or agrees with our Canadian city and postal
+  records. Needs-review leads come from third-party pages or unverified snippets -
+  open the source link before using them. Contacts were collected under robots.txt
+  rules. Generated __DATE__.</footer>
+</div>
+<script>
+const DATA = __DATA__;
+let tab = "confirmed", page = 0;
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+const nOk = DATA.filter(o => o.l === "confirmed").length;
+document.getElementById("n-ok").textContent = nOk;
+document.getElementById("n-rev").textContent = DATA.length - nOk;
+
+function setTab(t){
+  tab = t; page = 0;
+  document.getElementById("tab-ok").classList.toggle("on", t === "confirmed");
+  document.getElementById("tab-rev").classList.toggle("on", t === "review");
+  render();
+}
+
+function filtered(){
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  return DATA.filter(o => {
+    if (o.l !== tab) return false;
+    if (q && !(o.o.toLowerCase().includes(q) || o.v.toLowerCase().includes(q)
+               || o.h.toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+
+function render(){
+  const rows = filtered();
+  const per = +document.getElementById("per").value;
+  const maxPage = Math.max(0, Math.ceil(rows.length/per)-1);
+  if (page > maxPage) page = maxPage;
+  const slice = rows.slice(page*per, page*per+per);
+
+  document.getElementById("body").innerHTML = slice.map(o => `<tr>
+    <td><div class="name">${esc(o.o)}</div>
+        ${o.a ? '<div class="org">already in the main directory</div>' : ''}</td>
+    <td>${esc(o.f)}</td>
+    <td>${o.f === "Email"
+          ? `<a href="mailto:${esc(o.v)}">${esc(o.v)}</a>` : esc(o.v)}</td>
+    <td class="rawurl">${o.u ? `<a href="${esc(o.u)}" target="_blank" rel="noopener">${esc(o.h)}</a>`
+          : '<span class="org">' + (esc(o.h) || '—') + '</span>'}</td>
+    <td><span class="chip ${o.l === "confirmed" ? "ok" : "warn"}">${
+          o.l === "confirmed" ? "Confirmed" : "Needs review"}</span>
+        <div class="why">${esc(o.w)}</div></td>
+  </tr>`).join("");
+
+  document.getElementById("stat").textContent =
+    `${rows.length ? page*per+1 : 0}\u2013${Math.min(rows.length,(page+1)*per)} of ${rows.length}`;
+  document.getElementById("prev").disabled = page === 0;
+  document.getElementById("next").disabled = page >= maxPage;
+}
+
+document.getElementById("tab-ok").onclick = () => setTab("confirmed");
+document.getElementById("tab-rev").onclick = () => setTab("review");
+document.getElementById("q").oninput = () => { page = 0; render(); };
+document.getElementById("per").onchange = () => { page = 0; render(); };
+document.getElementById("prev").onclick = () => { page--; render(); };
+document.getElementById("next").onclick = () => { page++; render(); };
+render();
+</script>
+</body>
+</html>
